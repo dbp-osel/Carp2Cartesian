@@ -1,0 +1,230 @@
+#!/bin/bash
+#====================================================================
+# processMesh   : Process a cardiac mesh
+#
+# PROGRAMMER    : ABOUZAR KABOUDIAN
+# DARE          : Fri 18 Feb 2022 12:20:55 (EST)
+# PLACE         : Maryland, USA.
+#====================================================================
+
+#====================================================================
+# echo coloring functions
+#====================================================================
+black(){    echo "`tput setaf 0`$@`tput sgr0`" ;    }
+red(){      echo "`tput setaf 1`$@`tput sgr0`" ;    }
+green(){    echo "`tput setaf 2`$@`tput sgr0`" ;    }
+yellow(){   echo "`tput setaf 3`$@`tput sgr0`" ;    }
+blue(){     echo "`tput setaf 4`$@`tput sgr0`" ;    }
+magenta(){  echo "`tput setaf 5`$@`tput sgr0`" ;    }
+cyan(){     echo "`tput setaf 6`$@`tput sgr0`" ;    }
+white(){    echo "`tput setaf 7`$@`tput sgr0`" ;    }
+blink(){    echo "`tput blink`$@`tput sgr0`" ;      }
+bold(){     echo "`tput bold`$@`tput sgr0`" ;       }
+underline(){    
+            echo "`tput smul`$@`tput rmul`" ;       }
+
+#=========================================================================
+# display help 
+#=========================================================================
+function dispHelp(){
+    echo "|---------------------------------------|";
+    echo "|                       .  .      .     |";
+    echo "|  ._ ._. _  _. _  __ __|\/| _  __|_    |";
+    echo "|  [_)[  (_)(_.(/,_) _) |  |(/,_) [ )   |";
+    echo "|  |                                    |";
+    echo "|---------------------------------------|";
+    echo
+    echo " Process a VTK mesh to be ready for process in MATLAB"
+    echo 
+    echo " Usage: "
+    echo 
+    echo " processMesh <input_mesh> [options...]"
+    echo
+    echo " Options: "
+    echo "      -o|--omsh <output_mesh> Determine the name of the output mesh"
+    echo ""
+    echo "      -p|--proc               Create .proc file from carp files."
+    echo "                              Use this option to create all required"
+    echo "                              files for matlab scripts."
+    echo "                              If carp files don't exist, the are generated."
+    echo ""
+    echo "      -s|--summary            Write summary file"
+    echo ""
+    echo "      -r|--resample <size>    Resample the mesh with the mimum sample size"
+    echo "" 
+    echo "      -c|--carp               Create carp format mesh files"
+    echo "      -t|--type               Create .type file from carp files (debug)"
+    echo "      -v|--verbose            Enable verbose mode"
+    echo "      -h|--help               Display this message"
+}
+
+#=========================================================================
+# writeMessage: write a message if in verbose mode 
+#=========================================================================
+function writeMessage(){
+    if [[ -n "$VERB" ]] ; then
+        echo $1 ;
+    fi
+}
+
+TEMP_OPTS=`getopt -o o:r:pstcvh --long omsh:,resample:,proc,summary,type,carp,verbose,help -n processMesh -- "$@"`
+
+eval set -- "$TEMP_OPTS"
+
+WRKDIR=$PWD
+
+
+#--------------------------------------------------------------------
+# PROCESSING SCRIPT OPTIONS
+#--------------------------------------------------------------------
+while true ; do
+    case "$1" in
+        -o|--omsh)      OMSH="$2" ; shift 2 ;;
+        -r|--resample)  RESAMP="-r"; RSIZE="$2" ; shift 2 ;;
+        -p|--proc)  PROC="-p" ; shift ;;
+        -s|--summary) SUMMARY="-s" ; shift ;;
+        -t|--type)  TYPE="-t" ; shift ;;
+        -c|--carp)  CARP="-c" ; shift ;;
+        -v|--verbose) VERB="-v" ; shift ;;
+	--) case "$2" in
+                "") echo "$(red Error:) source mesh must be determined!" ; dispHelp ; exit 1 ;;
+                *)  SRC=$2 ; shift 2; break ;;
+            esac ;;
+        -h|--help|*) dispHelp ; exit 1 ;;
+    esac
+done 
+
+#=========================================================================
+# SETTING SRC FILE NAME AND SRC_PARENT DIRECTORY PATH
+#=========================================================================
+SRCNAME=`basename $SRC`
+SRCDIR=`dirname $SRC`
+
+
+cd $SRCDIR
+SRCDIR=$PWD
+cd $WRKDIR
+
+#=========================================================================
+# set the output mesh name 
+#=========================================================================
+function setOutMesh(){
+    if [[ -z "$OMSH" ]] ; then
+        writeMessage "$(magenta No output meshname was provided!)"
+        if [[ -n "$RESAMP" ]] ; then
+            OMSH=$SRCNAME"_"$RSIZE
+        else
+            OMSH=$SRCNAME
+        fi
+        writeMessage "$(cyan Setting output mesh name to $OMSH)"
+    fi
+}
+
+#=========================================================================
+# createCarp: creates the carp format mesh
+#=========================================================================
+function createCarp(){
+    CARPOUT=`basename $1`
+    writeMessage "$(cyan Converting $SRC into carp format...)"
+    cd $SRCDIR
+    meshtool convert -imsh=$SRCNAME -ifmt=vtk -omsh=$CARPOUT -ofmt=carp_txt
+    writeMessage "$(green Conversion complete!)"
+    cd $WRKDIR
+}
+
+
+#====================================================================
+# Write .summary json file: the summary file reports back the
+# the summary of mesh conversion process
+#====================================================================
+function writeSummary(){
+    writeMessage "$(cyan Writing summary file...)"
+    setOutMesh
+    OSUM=$OMSH.summary
+
+    cd $SRCDIR
+    echo  "{\"vtk\":\"$SRCNAME\" ,\"mesh\": \"$OMSH\"}" > $OSUM
+    cd $WRKDIR
+
+    writeMessage "$(green Done writing summary file!)"
+}
+
+#=========================================================================
+# initCarp: If the corresponding carp mesh doesn't exist, create it.
+#=========================================================================
+function initCarp(){
+    if [ -f "$1.elem" ] ; then
+        writeMessage "$(green Carp files exist. We can proceed!)"
+    else 
+        writeMessage "$(magenta Carp mesh does not exist! We have to create it!)"
+        createCarp $1
+    fi
+}
+
+#=========================================================================
+# Create the carp mesh if requested by user
+#=========================================================================
+if [[ -n "$CARP" ]] ; then
+    setOutMesh
+    createCarp $OMSH
+fi
+
+#=========================================================================
+# Create the proc files if requested by the user
+#=========================================================================
+if [[ -n "$PROC" ]] ; then
+    writeMessage
+    writeMessage "$(cyan Creating $SRCNAME.elem.proc file...)"
+
+    setOutMesh
+    initCarp $SRCDIR/$OMSH
+    
+    cd $SRCDIR
+    sed "1d" $OMSH.elem | awk '{print $2" "$3" "$4" "$5" "$6}' > $OMSH.elem.proc
+
+    writeMessage "$(green $OMSH.elem.proc created successfully!)" 
+
+    cd $WRKDIR
+
+    writeSummary 
+fi
+
+#=========================================================================
+# Create the type files if requested by the user
+#=========================================================================
+if [[ -n "$TYPE" ]] ; then
+    writeMessage
+    writeMessage "Creating $SRCNAME.elem.type file..."
+
+    setOutMesh
+    initCarp $SRCDIR/$OMSH
+    
+    cd $SRCDIR
+    sed "1d" $OMSH.elem | awk '{print $1}' > $OMSH.elem.type
+
+    writeMessage "$(green $OMSH.elem.type created successfully!)" 
+
+    cd $WRKDIR
+fi
+
+#=========================================================================
+# Resampling the mesh if requested by the user
+#=========================================================================
+if [[ -n "$RESAMP" ]] ; then
+    writeMessage "$(cyan Resampling the mesh...)"
+    
+    setOutMesh
+    initCarp $SRC 
+    
+    cd $SRCDIR
+    meshtool resample mesh -msh=$SRCNAME -min=$RSIZE -outmsh=$OMSH  
+    cd $WRKDIR
+    writeMessage "$(green Finished executing resampling command! Consider preparing the new mesh for matlab)"
+fi
+
+if [[ -n "$SUMMARY" ]] ; then 
+    writeSummary
+fi
+
+
+
